@@ -4,9 +4,10 @@ import Logo from '../components/Logo.jsx'
 import ThemeToggle from '../components/ThemeToggle.jsx'
 import PlatformBadge, { PLATFORMS } from '../components/PlatformBadge.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
+import * as slackApi from '../lib/slackApi.js'
 
-/* ── Mock messages (replaced by relay in production) ───────────────────── */
-const CONTACTS = [
+/* ── Mock contacts (shown when no platforms are connected) ──────────────── */
+const MOCK_CONTACTS = [
   {
     id: 1, name: 'Sarah Chen', init: 'SC', hue: '#D4BCFA',
     platforms: ['slack', 'whatsapp', 'instagram'], unread: 3,
@@ -51,7 +52,7 @@ const CONTACTS = [
       { id: 1, platform: 'imessage',  text: 'Happy birthday!! 🎂',                         time: 'Mon', in: true  },
       { id: 2, platform: 'messenger', text: 'Thank you!! Best day 😊',                     time: 'Mon', in: false },
       { id: 3, platform: 'imessage',  text: 'We need to catch up soon.',                   time: 'Mon', in: true  },
-      { id: 4, platform: 'messenger', text: 'Absolutely! Coffee next week?',               time: 'Mon', in: false },
+      { id: 4, platform: 'messenger', text: 'Coffee next week?',                           time: 'Mon', in: false },
       { id: 5, platform: 'imessage',  text: 'Saturday morning works!',                     time: 'Tue', in: true  },
     ],
   },
@@ -67,6 +68,18 @@ const CONTACTS = [
     ],
   },
 ]
+
+/* ── Helpers ────────────────────────────────────────────────────────────── */
+
+function formatSlackTime(ts) {
+  const d   = new Date(parseFloat(ts) * 1000)
+  const now = new Date()
+  if (d.toDateString() === now.toDateString())
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const yest = new Date(now - 86400000)
+  if (d.toDateString() === yest.toDateString()) return 'Yesterday'
+  return d.toLocaleDateString([], { weekday: 'short' })
+}
 
 /* ── Sub-components ─────────────────────────────────────────────────────── */
 
@@ -121,7 +134,7 @@ function Bubble({ msg, showLabel }) {
         borderRadius: msg.in ? '3px 12px 12px 12px' : '12px 3px 12px 12px',
         background: msg.in ? 'var(--bg-raised)' : 'var(--accent-bg)',
         border: `1px solid ${msg.in ? 'var(--line)' : 'var(--accent)'}`,
-        borderLeft: msg.in ? `2px solid ${pl.color}80` : undefined,
+        borderLeft:  msg.in  ? `2px solid ${pl.color}80` : undefined,
         borderRight: !msg.in ? `2px solid ${pl.color}80` : undefined,
         fontSize: 13.5, color: 'var(--tx-mid)',
       }}>
@@ -134,20 +147,26 @@ function Bubble({ msg, showLabel }) {
 /* ── Inbox page ─────────────────────────────────────────────────────────── */
 
 export default function Inbox() {
-  const { user, signOut } = useAuth()
+  const { user, signOut, platformConnections } = useAuth()
   const navigate = useNavigate()
 
-  const [contacts,       setContacts]       = useState(CONTACTS)
-  const [selectedId,     setSelectedId]     = useState(1)
-  const [msgsByContact,  setMsgsByContact]  = useState(Object.fromEntries(CONTACTS.map(c => [c.id, c.messages])))
-  const [filter,         setFilter]         = useState('all')
-  const [replyText,      setReplyText]      = useState('')
-  const [replyPlatform,  setReplyPlatform]  = useState('slack')
-  const [search,         setSearch]         = useState('')
-  const [showInfo,       setShowInfo]       = useState(false)
+  const [contacts,      setContacts]      = useState(MOCK_CONTACTS)
+  const [selectedId,    setSelectedId]    = useState(MOCK_CONTACTS[0]?.id)
+  const [msgsByContact, setMsgsByContact] = useState(
+    Object.fromEntries(MOCK_CONTACTS.map(c => [c.id, c.messages]))
+  )
+  const [filter,        setFilter]        = useState('all')
+  const [replyText,     setReplyText]     = useState('')
+  const [replyPlatform, setReplyPlatform] = useState('slack')
+  const [search,        setSearch]        = useState('')
+  const [showInfo,      setShowInfo]      = useState(false)
+  const [slackLoading,  setSlackLoading]  = useState(false)
+  const [slackSelf,     setSlackSelf]     = useState(null)
   const endRef = useRef(null)
 
-  const selected        = contacts.find(c => c.id === selectedId)
+  const slackConnected = platformConnections?.slack?.connected
+
+  const selected        = contacts.find(c => c.id === selectedId) ?? null
   const allMsgs         = msgsByContact[selectedId] || []
   const filteredMsgs    = filter === 'all' ? allMsgs : allMsgs.filter(m => m.platform === filter)
   const totalUnread     = contacts.reduce((s, c) => s + c.unread, 0)
@@ -156,6 +175,87 @@ export default function Inbox() {
   const userName  = user?.name || user?.email || 'Account'
   const userInit  = userName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
   const userEmail = user?.email || ''
+
+  /* ── Load Slack DMs when connected, reset to mock when not ─────────────── */
+  useEffect(() => {
+    if (!slackConnected) {
+      setContacts(MOCK_CONTACTS)
+      setSelectedId(MOCK_CONTACTS[0]?.id)
+      setMsgsByContact(Object.fromEntries(MOCK_CONTACTS.map(c => [c.id, c.messages])))
+      setSlackSelf(null)
+      return
+    }
+
+    let cancelled = false
+    setSlackLoading(true)
+
+    async function load() {
+      try {
+        const [self, { channels }] = await Promise.all([
+          slackApi.getSelf(),
+          slackApi.getDMs(),
+        ])
+        if (cancelled) return
+        setSlackSelf(self)
+
+        const userInfos = await Promise.all(
+          channels.map(ch => slackApi.getUser(ch.user).catch(() => null))
+        )
+        if (cancelled) return
+
+        const slackContacts = channels
+          .map((ch, i) => {
+            const u = userInfos[i]
+            if (!u || u.deleted || u.is_bot) return null
+            const name = u.profile.display_name || u.profile.real_name || u.name
+            const init = name.split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase() || '??'
+            return {
+              id:        ch.id,
+              name,
+              init,
+              hue:       '#E01E5A',
+              platforms: ['slack'],
+              unread:    ch.unread_count || 0,
+            }
+          })
+          .filter(Boolean)
+
+        if (cancelled) return
+        setContacts(slackContacts)
+        setSelectedId(slackContacts[0]?.id ?? null)
+        setMsgsByContact({})
+      } catch (err) {
+        console.error('Failed to load Slack DMs:', err)
+        if (!cancelled) { setContacts([]); setSelectedId(null) }
+      } finally {
+        if (!cancelled) setSlackLoading(false)
+      }
+    }
+
+    load()
+    return () => { cancelled = true }
+  }, [slackConnected])
+
+  /* ── Lazy-load messages for a Slack DM when it's selected ──────────────── */
+  useEffect(() => {
+    if (!slackConnected || !selectedId || msgsByContact[selectedId] !== undefined || !slackSelf) return
+
+    slackApi.getMessages(selectedId)
+      .then(({ messages }) => {
+        const formatted = messages
+          .filter(m => m.type === 'message' && m.text && !m.subtype)
+          .reverse()
+          .map(m => ({
+            id:       m.ts,
+            platform: 'slack',
+            text:     m.text,
+            time:     formatSlackTime(m.ts),
+            in:       m.user !== slackSelf.user_id,
+          }))
+        setMsgsByContact(prev => ({ ...prev, [selectedId]: formatted }))
+      })
+      .catch(err => console.error('Failed to load Slack messages:', err))
+  }, [selectedId, slackConnected, slackSelf, msgsByContact])
 
   useEffect(() => {
     if (selected) setReplyPlatform(selected.platforms[0])
@@ -172,10 +272,15 @@ export default function Inbox() {
   }
 
   const send = () => {
-    if (!replyText.trim()) return
-    const msg = { id: Date.now(), platform: replyPlatform, text: replyText, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), in: false }
+    if (!replyText.trim() || !selected) return
+    const text = replyText.trim()
+    const msg  = { id: Date.now(), platform: replyPlatform, text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), in: false }
     setMsgsByContact(p => ({ ...p, [selectedId]: [...(p[selectedId] || []), msg] }))
     setReplyText('')
+
+    if (replyPlatform === 'slack' && slackConnected) {
+      slackApi.sendMessage(selectedId, text).catch(err => console.error('Slack send failed:', err))
+    }
   }
 
   const handleSignOut = async () => {
@@ -208,10 +313,26 @@ export default function Inbox() {
 
         {/* Contacts */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px' }}>
-          <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--tx-faint)', textTransform: 'uppercase', padding: '4px 4px', marginBottom: 6, fontFamily: 'var(--mono)' }}>People</div>
-          {visibleContacts.map(c => (
-            <ContactItem key={c.id} c={c} selected={selectedId === c.id} msgs={msgsByContact[c.id] || []} onClick={() => selectContact(c.id)} />
-          ))}
+          <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--tx-faint)', textTransform: 'uppercase', padding: '4px 4px', marginBottom: 6, fontFamily: 'var(--mono)' }}>
+            {slackConnected ? 'Slack DMs' : 'People'}
+          </div>
+
+          {slackLoading ? (
+            <div style={{ padding: '24px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+              <div style={{ width: 16, height: 16, border: '2px solid var(--line)', borderTopColor: '#E01E5A', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+              <span style={{ fontSize: 11, color: 'var(--tx-faint)', fontFamily: 'var(--mono)' }}>Loading Slack…</span>
+              <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+            </div>
+          ) : visibleContacts.length === 0 ? (
+            <div style={{ padding: '24px 8px', textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: 'var(--tx-faint)', marginBottom: 8 }}>No conversations</div>
+              <Link to="/connect" style={{ fontSize: 11, color: 'var(--accent-fg)', textDecoration: 'none' }}>+ Connect a platform</Link>
+            </div>
+          ) : (
+            visibleContacts.map(c => (
+              <ContactItem key={c.id} c={c} selected={selectedId === c.id} msgs={msgsByContact[c.id] || []} onClick={() => selectContact(c.id)} />
+            ))
+          )}
         </div>
 
         {/* Footer — user info */}
@@ -246,127 +367,149 @@ export default function Inbox() {
 
       {/* ── Main ── */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-
-        {/* Chat header */}
-        <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-          <div style={{ width: 34, height: 34, borderRadius: '50%', background: selected.hue + '25', border: `1.5px solid ${selected.hue}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: selected.hue, flexShrink: 0 }}>
-            {selected.init}
+        {!selected ? (
+          /* Empty / loading state */
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10 }}>
+            {slackLoading ? (
+              <>
+                <div style={{ width: 18, height: 18, border: '2px solid var(--line)', borderTopColor: '#E01E5A', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+                <div style={{ fontSize: 13, color: 'var(--tx-faint)' }}>Loading conversations…</div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 22, marginBottom: 2 }}>💬</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tx)', marginBottom: 4 }}>No conversations yet</div>
+                <Link to="/connect" style={{ fontSize: 13, color: 'var(--accent-fg)', textDecoration: 'none' }}>Connect a platform →</Link>
+              </>
+            )}
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--tx)', marginBottom: 3 }}>{selected.name}</div>
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-              {selected.platforms.map(p => <PlatformBadge key={p} id={p} size="xs" showName />)}
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
-            {['all', ...selected.platforms].map(p => {
-              const active = filter === p
-              const pl = PLATFORMS[p]
-              return (
-                <button key={p} onClick={() => setFilter(p)} style={{
-                  fontFamily: 'var(--font)', fontSize: 11, fontWeight: 500, border: 'none', cursor: 'pointer',
-                  borderRadius: 'var(--r-full)', padding: '3px 10px',
-                  background: active ? (p === 'all' ? 'var(--bg-sunken)' : pl.color + '18') : 'transparent',
-                  color: active ? (p === 'all' ? 'var(--tx)' : pl?.color) : 'var(--tx-faint)',
-                  outline: active ? `1px solid ${p === 'all' ? 'var(--line)' : pl.color + '40'}` : 'none',
-                  transition: 'all var(--fast)',
-                }}>
-                  {p === 'all' ? 'All' : pl.name}
+        ) : (
+          <>
+            {/* Chat header */}
+            <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+              <div style={{ width: 34, height: 34, borderRadius: '50%', background: selected.hue + '25', border: `1.5px solid ${selected.hue}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: selected.hue, flexShrink: 0 }}>
+                {selected.init}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--tx)', marginBottom: 3 }}>{selected.name}</div>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {selected.platforms.map(p => <PlatformBadge key={p} id={p} size="xs" showName />)}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
+                {['all', ...selected.platforms].map(p => {
+                  const active = filter === p
+                  const pl = PLATFORMS[p]
+                  return (
+                    <button key={p} onClick={() => setFilter(p)} style={{
+                      fontFamily: 'var(--font)', fontSize: 11, fontWeight: 500, border: 'none', cursor: 'pointer',
+                      borderRadius: 'var(--r-full)', padding: '3px 10px',
+                      background: active ? (p === 'all' ? 'var(--bg-sunken)' : pl.color + '18') : 'transparent',
+                      color: active ? (p === 'all' ? 'var(--tx)' : pl?.color) : 'var(--tx-faint)',
+                      outline: active ? `1px solid ${p === 'all' ? 'var(--line)' : pl.color + '40'}` : 'none',
+                      transition: 'all var(--fast)',
+                    }}>
+                      {p === 'all' ? 'All' : pl.name}
+                    </button>
+                  )
+                })}
+                <button onClick={() => setShowInfo(v => !v)} style={{ width: 28, height: 28, borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', background: showInfo ? 'var(--accent-bg)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', marginLeft: 4 }}>
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke={showInfo ? 'var(--accent)' : 'var(--tx-faint)'} strokeWidth="1.2"/><path d="M6.5 5.5v4M6.5 4.5v.2" stroke={showInfo ? 'var(--accent)' : 'var(--tx-faint)'} strokeWidth="1.2" strokeLinecap="round"/></svg>
                 </button>
-              )
-            })}
-            <button onClick={() => setShowInfo(v => !v)} style={{ width: 28, height: 28, borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', background: showInfo ? 'var(--accent-bg)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', marginLeft: 4 }}>
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke={showInfo ? 'var(--accent)' : 'var(--tx-faint)'} strokeWidth="1.2"/><path d="M6.5 5.5v4M6.5 4.5v.2" stroke={showInfo ? 'var(--accent)' : 'var(--tx-faint)'} strokeWidth="1.2" strokeLinecap="round"/></svg>
-            </button>
-          </div>
-        </div>
-
-        <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-          {/* Messages */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-              <div style={{ flex: 1, height: 1, background: 'var(--line)' }} />
-              <span style={{ fontSize: 10, color: 'var(--tx-faint)', fontFamily: 'var(--mono)', letterSpacing: '0.08em' }}>TODAY</span>
-              <div style={{ flex: 1, height: 1, background: 'var(--line)' }} />
-            </div>
-            {filteredMsgs.map((msg, i) => (
-              <Bubble key={msg.id} msg={msg}
-                showLabel={i === 0 || filteredMsgs[i-1]?.platform !== msg.platform || filteredMsgs[i-1]?.in !== msg.in}
-              />
-            ))}
-            <div ref={endRef} />
-          </div>
-
-          {/* Info panel */}
-          {showInfo && (
-            <div style={{ width: 220, borderLeft: '1px solid var(--line)', padding: '18px 16px', overflowY: 'auto', flexShrink: 0 }}>
-              <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', color: 'var(--tx-faint)', textTransform: 'uppercase', fontFamily: 'var(--mono)', marginBottom: 14 }}>Contact</div>
-              <div style={{ textAlign: 'center', marginBottom: 16 }}>
-                <div style={{ width: 46, height: 46, borderRadius: '50%', background: selected.hue + '25', border: `2px solid ${selected.hue}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: selected.hue, margin: '0 auto 10px' }}>{selected.init}</div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tx)' }}>{selected.name}</div>
-                <div style={{ fontSize: 11, color: 'var(--tx-faint)', fontFamily: 'var(--mono)', marginTop: 3 }}>{selected.platforms.length} platforms</div>
-              </div>
-              <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', color: 'var(--tx-faint)', textTransform: 'uppercase', fontFamily: 'var(--mono)', marginBottom: 8 }}>Platforms</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 18 }}>
-                {selected.platforms.map(p => (
-                  <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: 'var(--bg-raised)', border: '1px solid var(--line)', borderRadius: 'var(--r-md)' }}>
-                    <PlatformBadge id={p} size="sm" />
-                    <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--tx-mid)', flex: 1 }}>{PLATFORMS[p].name}</span>
-                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: PLATFORMS[p].color }} />
-                  </div>
-                ))}
-              </div>
-              <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', color: 'var(--tx-faint)', textTransform: 'uppercase', fontFamily: 'var(--mono)', marginBottom: 8 }}>Stats</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
-                {[['Messages', allMsgs.length], ['Platforms', selected.platforms.length], ['Sent', allMsgs.filter(m => !m.in).length], ['Received', allMsgs.filter(m => m.in).length]].map(([l, v]) => (
-                  <div key={l} style={{ background: 'var(--bg-raised)', border: '1px solid var(--line)', borderRadius: 'var(--r-md)', padding: '8px 10px' }}>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--tx)', fontFamily: 'var(--mono)' }}>{v}</div>
-                    <div style={{ fontSize: 10, color: 'var(--tx-faint)', fontFamily: 'var(--mono)' }}>{l}</div>
-                  </div>
-                ))}
               </div>
             </div>
-          )}
-        </div>
 
-        {/* Reply bar */}
-        <div style={{ padding: '12px 20px 16px', borderTop: '1px solid var(--line)', flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8 }}>
-            <span style={{ fontSize: 10, color: 'var(--tx-faint)', fontFamily: 'var(--mono)', marginRight: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Reply via</span>
-            {selected.platforms.map(p => {
-              const pl = PLATFORMS[p]
-              const active = replyPlatform === p
-              return (
-                <button key={p} onClick={() => setReplyPlatform(p)} style={{
-                  fontFamily: 'var(--font)', fontSize: 11, fontWeight: 500, cursor: 'pointer',
-                  padding: '4px 9px', borderRadius: 'var(--r-full)',
-                  border: `1px solid ${active ? pl.color + '50' : 'transparent'}`,
-                  background: active ? pl.color + '12' : 'transparent',
-                  color: active ? pl.color : 'var(--tx-faint)',
-                  display: 'flex', alignItems: 'center', gap: 5, transition: 'all var(--fast)',
-                }}>
-                  <PlatformBadge id={p} size="xs" />
-                  {pl.name}
+            <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+              {/* Messages */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+                  <div style={{ flex: 1, height: 1, background: 'var(--line)' }} />
+                  <span style={{ fontSize: 10, color: 'var(--tx-faint)', fontFamily: 'var(--mono)', letterSpacing: '0.08em' }}>TODAY</span>
+                  <div style={{ flex: 1, height: 1, background: 'var(--line)' }} />
+                </div>
+                {filteredMsgs.length === 0 && !slackLoading && (
+                  <div style={{ textAlign: 'center', color: 'var(--tx-faint)', fontSize: 12, marginTop: 20 }}>No messages yet</div>
+                )}
+                {filteredMsgs.map((msg, i) => (
+                  <Bubble key={msg.id} msg={msg}
+                    showLabel={i === 0 || filteredMsgs[i-1]?.platform !== msg.platform || filteredMsgs[i-1]?.in !== msg.in}
+                  />
+                ))}
+                <div ref={endRef} />
+              </div>
+
+              {/* Info panel */}
+              {showInfo && (
+                <div style={{ width: 220, borderLeft: '1px solid var(--line)', padding: '18px 16px', overflowY: 'auto', flexShrink: 0 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', color: 'var(--tx-faint)', textTransform: 'uppercase', fontFamily: 'var(--mono)', marginBottom: 14 }}>Contact</div>
+                  <div style={{ textAlign: 'center', marginBottom: 16 }}>
+                    <div style={{ width: 46, height: 46, borderRadius: '50%', background: selected.hue + '25', border: `2px solid ${selected.hue}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: selected.hue, margin: '0 auto 10px' }}>{selected.init}</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tx)' }}>{selected.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--tx-faint)', fontFamily: 'var(--mono)', marginTop: 3 }}>{selected.platforms.length} platform{selected.platforms.length !== 1 ? 's' : ''}</div>
+                  </div>
+                  <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', color: 'var(--tx-faint)', textTransform: 'uppercase', fontFamily: 'var(--mono)', marginBottom: 8 }}>Platforms</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 18 }}>
+                    {selected.platforms.map(p => (
+                      <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: 'var(--bg-raised)', border: '1px solid var(--line)', borderRadius: 'var(--r-md)' }}>
+                        <PlatformBadge id={p} size="sm" />
+                        <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--tx-mid)', flex: 1 }}>{PLATFORMS[p].name}</span>
+                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: PLATFORMS[p].color }} />
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', color: 'var(--tx-faint)', textTransform: 'uppercase', fontFamily: 'var(--mono)', marginBottom: 8 }}>Stats</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+                    {[['Messages', allMsgs.length], ['Platforms', selected.platforms.length], ['Sent', allMsgs.filter(m => !m.in).length], ['Received', allMsgs.filter(m => m.in).length]].map(([l, v]) => (
+                      <div key={l} style={{ background: 'var(--bg-raised)', border: '1px solid var(--line)', borderRadius: 'var(--r-md)', padding: '8px 10px' }}>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--tx)', fontFamily: 'var(--mono)' }}>{v}</div>
+                        <div style={{ fontSize: 10, color: 'var(--tx-faint)', fontFamily: 'var(--mono)' }}>{l}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Reply bar */}
+            <div style={{ padding: '12px 20px 16px', borderTop: '1px solid var(--line)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8 }}>
+                <span style={{ fontSize: 10, color: 'var(--tx-faint)', fontFamily: 'var(--mono)', marginRight: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Reply via</span>
+                {selected.platforms.map(p => {
+                  const pl = PLATFORMS[p]
+                  const active = replyPlatform === p
+                  return (
+                    <button key={p} onClick={() => setReplyPlatform(p)} style={{
+                      fontFamily: 'var(--font)', fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                      padding: '4px 9px', borderRadius: 'var(--r-full)',
+                      border: `1px solid ${active ? pl.color + '50' : 'transparent'}`,
+                      background: active ? pl.color + '12' : 'transparent',
+                      color: active ? pl.color : 'var(--tx-faint)',
+                      display: 'flex', alignItems: 'center', gap: 5, transition: 'all var(--fast)',
+                    }}>
+                      <PlatformBadge id={p} size="xs" />
+                      {pl.name}
+                    </button>
+                  )
+                })}
+              </div>
+              <div style={{ background: 'var(--bg-raised)', border: `1px solid ${replyText ? 'var(--accent)' : 'var(--line)'}`, borderRadius: 'var(--r-lg)', padding: '10px 12px', display: 'flex', alignItems: 'flex-end', gap: 10, transition: 'border-color var(--fast)' }}>
+                <div style={{ width: 2.5, alignSelf: 'stretch', borderRadius: 2, background: PLATFORMS[replyPlatform]?.color + '80', flexShrink: 0 }} />
+                <textarea rows={1} value={replyText} onChange={e => setReplyText(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+                  placeholder={`Message via ${PLATFORMS[replyPlatform]?.name || ''}…`}
+                  style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--tx)', fontSize: 13.5, lineHeight: 1.5, fontFamily: 'var(--font)', resize: 'none', maxHeight: 120, overflowY: 'auto' }}
+                />
+                <button onClick={send} style={{ width: 30, height: 30, borderRadius: 'var(--r-md)', border: 'none', background: replyText.trim() ? 'var(--btn-bg)' : 'var(--bg-sunken)', color: replyText.trim() ? 'var(--btn-fg)' : 'var(--tx-faint)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: replyText.trim() ? 'pointer' : 'default', transition: 'all var(--fast)', flexShrink: 0 }}>
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 6.5h9M7.5 2.5l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 </button>
-              )
-            })}
-          </div>
-          <div style={{ background: 'var(--bg-raised)', border: `1px solid ${replyText ? 'var(--accent)' : 'var(--line)'}`, borderRadius: 'var(--r-lg)', padding: '10px 12px', display: 'flex', alignItems: 'flex-end', gap: 10, transition: 'border-color var(--fast)' }}>
-            <div style={{ width: 2.5, alignSelf: 'stretch', borderRadius: 2, background: PLATFORMS[replyPlatform]?.color + '80', flexShrink: 0 }} />
-            <textarea rows={1} value={replyText} onChange={e => setReplyText(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-              placeholder={`Message via ${PLATFORMS[replyPlatform]?.name || ''}…`}
-              style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--tx)', fontSize: 13.5, lineHeight: 1.5, fontFamily: 'var(--font)', resize: 'none', maxHeight: 120, overflowY: 'auto' }}
-            />
-            <button onClick={send} style={{ width: 30, height: 30, borderRadius: 'var(--r-md)', border: 'none', background: replyText.trim() ? 'var(--btn-bg)' : 'var(--bg-sunken)', color: replyText.trim() ? 'var(--btn-fg)' : 'var(--tx-faint)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: replyText.trim() ? 'pointer' : 'default', transition: 'all var(--fast)', flexShrink: 0 }}>
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 6.5h9M7.5 2.5l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </button>
-          </div>
-          <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 10, color: 'var(--tx-faint)', fontFamily: 'var(--mono)' }}>Enter to send · Shift+Enter for newline</span>
-            <span style={{ fontSize: 10, color: 'var(--tx-faint)', fontFamily: 'var(--mono)' }}>baard.cc</span>
-          </div>
-        </div>
+              </div>
+              <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 10, color: 'var(--tx-faint)', fontFamily: 'var(--mono)' }}>Enter to send · Shift+Enter for newline</span>
+                <span style={{ fontSize: 10, color: 'var(--tx-faint)', fontFamily: 'var(--mono)' }}>baard.cc</span>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

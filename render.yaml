@@ -1,12 +1,23 @@
 # ─────────────────────────────────────────────────────────────────────────────
 #  baard — render.yaml
-#  Defines the entire infrastructure: web service + PostgreSQL database.
+#  Complete infrastructure as code: Node.js web service + PostgreSQL.
 #
-#  How to deploy:
+#  Deploy via Blueprint:
 #  1. Push this repo to GitHub
-#  2. In Render Dashboard → New → Blueprint Instance → connect your repo
-#  3. Set the environment variables marked "sync: false" (see below)
-#  4. Deploy — Render provisions the DB and launches the server automatically
+#  2. Render Dashboard → New → Blueprint Instance → connect repo
+#  3. Render shows a preview — click Apply
+#  4. Once the first deploy completes, set the env vars marked sync:false
+#     in Render Dashboard → your service → Environment:
+#
+#       APP_URL            your public URL, e.g. https://baard.onrender.com
+#                          (update to custom domain once DNS is pointed)
+#       SLACK_CLIENT_ID    from api.slack.com/apps → your app → OAuth & Permissions
+#       SLACK_CLIENT_SECRET
+#       GOOGLE_CLIENT_ID   optional — email/password auth works without it
+#       GOOGLE_CLIENT_SECRET
+#
+#  5. In your Slack app add these redirect URIs:
+#       https://<APP_URL>/api/auth/slack/callback
 #
 #  Docs: https://render.com/docs/infrastructure-as-code
 # ─────────────────────────────────────────────────────────────────────────────
@@ -15,42 +26,59 @@ services:
   - type: web
     name: baard
     runtime: node
-    plan: free                        # upgrade to starter for always-on
+    plan: free                     # upgrade to Starter for always-on (no spin-down)
+    region: oregon
     buildCommand: npm install && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
-    autoDeploy: true                  # deploys on every push to main
+    autoDeploy: true               # redeploys on every push to the default branch
 
     envVars:
       - key: NODE_ENV
         value: production
 
-      # Injected automatically from the database below
+      - key: NODE_VERSION
+        value: "20.18.0"
+
+      # Injected automatically from the PostgreSQL database defined below
       - key: DATABASE_URL
         fromDatabase:
           name: baard-db
           property: connectionString
 
-      # Auto-generated secure random string (no action needed)
+      # Auto-generated secure random — no action needed
       - key: JWT_SECRET
         generateValue: true
 
-      # Set these manually in Render Dashboard → Environment after first deploy
+      # ── Required — set in Render Dashboard after first deploy ─────────────
+      # Your service's public URL with no trailing slash.
+      # Use the Render-assigned URL (https://<name>.onrender.com) until you
+      # point a custom domain. This value must match the redirect URIs
+      # registered in your Slack and Google OAuth apps.
       - key: APP_URL
-        value: https://baard.cc         # ← update to your actual domain
+        sync: false
 
+      # ── Slack OAuth (required for Slack DM integration) ───────────────────
+      - key: SLACK_CLIENT_ID
+        sync: false
+
+      - key: SLACK_CLIENT_SECRET
+        sync: false
+
+      # ── Google OAuth (optional) ────────────────────────────────────────────
       - key: GOOGLE_CLIENT_ID
-        sync: false                     # set in Render Dashboard
+        sync: false
 
       - key: GOOGLE_CLIENT_SECRET
-        sync: false                     # set in Render Dashboard
+        sync: false
 
-      # Optional: Cloudflare Worker relay URL
+      # ── Relay worker URL (future use) ──────────────────────────────────────
       - key: RELAY_URL
         sync: false
 
 databases:
   - name: baard-db
     databaseName: baard
-    plan: free                          # Render free PostgreSQL (90-day expiry on free plan)
-    # Upgrade to starter ($7/mo) for persistent production DB
+    plan: free                     # free tier expires after 90 days
+    ipAllowList: []                # allow all connections within Render's network
+    # Upgrade to Starter ($7/mo) for a persistent production database

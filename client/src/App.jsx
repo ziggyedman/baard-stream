@@ -6,12 +6,13 @@ import ProtectedRoute   from './components/ProtectedRoute.jsx'
 
 export { useTheme } from './context/ThemeContext.jsx'
 
-const Landing  = lazy(() => import('./pages/Landing.jsx'))
-const Login    = lazy(() => import('./pages/Login.jsx'))
-const Pricing  = lazy(() => import('./pages/Pricing.jsx'))
-const Connect  = lazy(() => import('./pages/Connect.jsx'))
-const Inbox    = lazy(() => import('./pages/Inbox.jsx'))
-const Settings = lazy(() => import('./pages/Settings.jsx'))
+const Landing       = lazy(() => import('./pages/Landing.jsx'))
+const Login         = lazy(() => import('./pages/Login.jsx'))
+const Pricing       = lazy(() => import('./pages/Pricing.jsx'))
+const Connect       = lazy(() => import('./pages/Connect.jsx'))
+const Inbox         = lazy(() => import('./pages/Inbox.jsx'))
+const Settings      = lazy(() => import('./pages/Settings.jsx'))
+const SlackCallback = lazy(() => import('./pages/SlackCallback.jsx'))
 
 function Spinner() {
   return (
@@ -37,6 +38,8 @@ export default function App() {
             <Route path="/connect"  element={<ProtectedRoute><Connect /></ProtectedRoute>} />
             <Route path="/inbox"    element={<ProtectedRoute><Inbox /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+
+            <Route path="/slack-callback" element={<SlackCallback />} />
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

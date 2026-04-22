@@ -20,6 +20,7 @@ import {
   useEffect, useReducer, useState,
 } from 'react'
 import { auth, user as userApi, platforms as platformsApi } from '../lib/api.js'
+import { deleteToken } from '../lib/tokenStore.js'
 
 /* ── Default shapes ───────────────────────────────────────────────────── */
 
@@ -144,6 +145,7 @@ export function AuthProvider({ children }) {
     }))
     try {
       await platformsApi.revoke(id)
+      await deleteToken(id).catch(() => {})
       setPlatformConnections(prev => ({
         ...prev,
         [id]: { connected: false, connectedAt: null, revoking: false },

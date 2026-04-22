@@ -254,4 +254,70 @@ router.get('/google/callback', (req, res, next) => {
   })
 })
 
+/* ── Slack OAuth ─────────────────────────────────────────────────────────── */
+// Token exchange is server-side (needs client secret).
+// The resulting user token is passed to the frontend via URL hash fragment —
+// never stored server-side, never appears in server logs.
+
+const SLACK_ENABLED    = !!(process.env.SLACK_CLIENT_ID && process.env.SLACK_CLIENT_SECRET)
+const SLACK_USER_SCOPE = 'channels:history,channels:read,im:history,im:read,users:read,chat:write'
+
+if (SLACK_ENABLED) {
+  console.log('✓ Slack OAuth enabled')
+} else {
+  console.log('ℹ Slack OAuth disabled (SLACK_CLIENT_ID not set)')
+}
+
+/**
+ * GET /api/auth/slack
+ * Initiates Slack OAuth flow — redirects to Slack authorisation page
+ */
+router.get('/slack', (req, res) => {
+  if (!SLACK_ENABLED) return res.redirect('/connect?error=slack_not_configured')
+  const url = new URL('https://slack.com/oauth/v2/authorize')
+  url.searchParams.set('client_id',    process.env.SLACK_CLIENT_ID)
+  url.searchParams.set('user_scope',   SLACK_USER_SCOPE)
+  url.searchParams.set('redirect_uri', `${process.env.APP_URL}/api/auth/slack/callback`)
+  res.redirect(url.toString())
+})
+
+/**
+ * GET /api/auth/slack/callback
+ * Slack redirects here with a one-time code — exchange it for a user token,
+ * then hand the token to the frontend via hash fragment (not query string, so
+ * it is never sent to any server and is cleared from history immediately).
+ */
+router.get('/slack/callback', async (req, res) => {
+  if (!SLACK_ENABLED) return res.redirect('/connect?error=slack_not_configured')
+
+  const { code, error } = req.query
+  if (error || !code) {
+    return res.redirect(`/slack-callback#error=${encodeURIComponent(error || 'access_denied')}`)
+  }
+
+  try {
+    const response = await fetch('https://slack.com/api/oauth.v2.access', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body:    new URLSearchParams({
+        client_id:     process.env.SLACK_CLIENT_ID,
+        client_secret: process.env.SLACK_CLIENT_SECRET,
+        code,
+        redirect_uri:  `${process.env.APP_URL}/api/auth/slack/callback`,
+      }),
+    })
+    const data = await response.json()
+
+    if (!data.ok || !data.authed_user?.access_token) {
+      console.error('Slack token exchange failed:', data.error)
+      return res.redirect(`/slack-callback#error=${encodeURIComponent(data.error || 'token_exchange_failed')}`)
+    }
+
+    res.redirect(`/slack-callback#t=${encodeURIComponent(data.authed_user.access_token)}`)
+  } catch (err) {
+    console.error('Slack OAuth error:', err.message)
+    res.redirect('/slack-callback#error=server_error')
+  }
+})
+
 export default router

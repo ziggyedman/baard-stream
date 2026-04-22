@@ -32,7 +32,7 @@ app.use(helmet({
       styleSrc:   ["'self'", "'unsafe-inline'", 'fonts.googleapis.com', 'fonts.gstatic.com'],
       fontSrc:    ["'self'", 'fonts.gstatic.com'],
       imgSrc:     ["'self'", 'data:', 'https:'],
-      connectSrc: ["'self'", process.env.RELAY_URL || ''].filter(Boolean),
+      connectSrc: ["'self'", 'https://slack.com', process.env.RELAY_URL || ''].filter(Boolean),
     },
   },
 }))

@@ -73,19 +73,31 @@ function StepConnect({ onNext }) {
 
   const connectedCount = Object.values(platformConnections).filter(c => c.connected).length
 
+  // Platforms that use OAuth — clicking connect redirects to their auth flow
+  const OAUTH_URLS = { slack: '/api/auth/slack' }
+
   const toggle = async (id) => {
     setError(null)
-    setBusy(id)
-    try {
-      if (platformConnections[id]?.connected) {
+    if (platformConnections[id]?.connected) {
+      setBusy(id)
+      try {
         await revokePlatform(id)
-      } else {
-        await connectPlatform(id)
+      } catch (err) {
+        setError(err.message)
+      } finally {
+        setBusy(null)
       }
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(null)
+    } else if (OAUTH_URLS[id]) {
+      window.location.href = OAUTH_URLS[id]
+    } else {
+      setBusy(id)
+      try {
+        await connectPlatform(id)
+      } catch (err) {
+        setError(err.message)
+      } finally {
+        setBusy(null)
+      }
     }
   }
 
