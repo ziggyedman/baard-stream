@@ -5,6 +5,7 @@ import passport from 'passport'
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20'
 import { body, validationResult } from 'express-validator'
 import { query, transaction } from '../db/pool.js'
+import requireAuth from '../middleware/requireAuth.js'
 
 const router = express.Router()
 
@@ -114,11 +115,10 @@ passport.deserializeUser((id, done) => done(null, { id }))
 
 /**
  * GET /api/auth/me
- * Returns the current user (checked via JWT middleware separately in index.js)
+ * Returns the current user. requireAuth verifies the JWT cookie and populates req.user.
  */
-router.get('/me', async (req, res) => {
+router.get('/me', requireAuth, async (req, res) => {
   try {
-    if (!req.user) return res.status(401).json({ error: 'Not authenticated' })
     const { rows: [settings] } = await query(
       'SELECT * FROM user_settings WHERE user_id = $1',
       [req.user.id]
@@ -275,7 +275,7 @@ if (SLACK_ENABLED) {
  * Initiates Slack OAuth flow — redirects to Slack authorisation page
  */
 router.get('/slack', (req, res) => {
-  if (!SLACK_ENABLED) return res.redirect('/connect?error=slack_not_configured')
+  if (!SLACK_ENABLED) return res.redirect(`${FRONTEND_URL}/settings`)
   const url = new URL('https://slack.com/oauth/v2/authorize')
   url.searchParams.set('client_id',    process.env.SLACK_CLIENT_ID)
   url.searchParams.set('user_scope',   SLACK_USER_SCOPE)
@@ -290,7 +290,7 @@ router.get('/slack', (req, res) => {
  * it is never sent to any server and is cleared from history immediately).
  */
 router.get('/slack/callback', async (req, res) => {
-  if (!SLACK_ENABLED) return res.redirect('/connect?error=slack_not_configured')
+  if (!SLACK_ENABLED) return res.redirect(`${FRONTEND_URL}/settings`)
 
   const { code, error } = req.query
   if (error || !code) {

@@ -26,7 +26,7 @@ export default function SlackCallback() {
       try {
         await setToken('slack', token)
         await connectPlatform('slack')
-        navigate('/settings', { replace: true, state: { tab: 'integrations' } })
+        navigate('/inbox', { replace: true, state: { connected: 'slack' } })
       } catch (e) {
         console.error('SlackCallback error:', e)
         setError(e.message)

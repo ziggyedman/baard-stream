@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import Logo from '../components/Logo.jsx'
 import ThemeToggle from '../components/ThemeToggle.jsx'
 import PlatformBadge, { PLATFORMS } from '../components/PlatformBadge.jsx'
@@ -86,6 +86,7 @@ function Bubble({ msg, showLabel }) {
 export default function Inbox() {
   const { user, signOut, platformConnections } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
 
   const [contacts,      setContacts]      = useState([])
   const [selectedId,    setSelectedId]    = useState(null)
@@ -97,6 +98,7 @@ export default function Inbox() {
   const [showInfo,      setShowInfo]      = useState(false)
   const [slackLoading,  setSlackLoading]  = useState(false)
   const [slackSelf,     setSlackSelf]     = useState(null)
+  const [successToast,  setSuccessToast]  = useState(location.state?.connected || null)
   const endRef = useRef(null)
 
   const slackConnected = platformConnections?.slack?.connected
@@ -218,6 +220,12 @@ export default function Inbox() {
     }
   }
 
+  useEffect(() => {
+    if (!successToast) return
+    const t = setTimeout(() => setSuccessToast(null), 4500)
+    return () => clearTimeout(t)
+  }, [successToast])
+
   const handleSignOut = async () => {
     await signOut()
     navigate('/login', { replace: true })
@@ -225,7 +233,22 @@ export default function Inbox() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: 'var(--bg)', overflow: 'hidden', fontFamily: 'var(--font)' }}>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}@keyframes slideUp{from{opacity:0;transform:translateX(-50%) translateY(12px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}`}</style>
+
+      {/* Success toast */}
+      {successToast && (
+        <div style={{
+          position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)',
+          background: '#059669', color: '#fff',
+          padding: '11px 22px', borderRadius: 'var(--r-md)',
+          fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em',
+          boxShadow: '0 8px 30px rgba(5,150,105,.3)',
+          zIndex: 200, whiteSpace: 'nowrap',
+          animation: 'slideUp 0.25s ease',
+        }}>
+          ✓ Slack connected — loading your DMs
+        </div>
+      )}
 
       {/* ── Sidebar ── */}
       <div style={{ width: 260, borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
@@ -259,13 +282,13 @@ export default function Inbox() {
               <span style={{ fontSize: 11, color: 'var(--tx-faint)', fontFamily: 'var(--mono)' }}>Loading…</span>
             </div>
           ) : contacts.length === 0 ? (
-            <div style={{ padding: '20px 8px', textAlign: 'center' }}>
-              <div style={{ fontSize: 12, color: 'var(--tx-faint)', marginBottom: 10, lineHeight: 1.6 }}>
+            <div style={{ padding: '24px 8px', textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: 'var(--tx-faint)', marginBottom: anyConnected ? 0 : 10, lineHeight: 1.6 }}>
                 {anyConnected ? 'No conversations yet' : 'No platforms connected'}
               </div>
               {!anyConnected && (
-                <Link to="/settings" state={{ tab: 'integrations' }} style={{ fontSize: 11, color: 'var(--accent-fg)', textDecoration: 'none', fontWeight: 500 }}>
-                  Connect a platform →
+                <Link to="/settings" state={{ tab: 'integrations' }} style={{ fontSize: 11.5, color: 'var(--accent-fg)', textDecoration: 'none', fontWeight: 600 }}>
+                  Get started →
                 </Link>
               )}
             </div>
@@ -309,27 +332,64 @@ export default function Inbox() {
       {/* ── Main ── */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         {!selected ? (
-          /* Empty / loading state */
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 40px' }}>
             {slackLoading ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-                <div style={{ width: 20, height: 20, border: '2px solid var(--line)', borderTopColor: '#E01E5A', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
-                <div style={{ fontSize: 13, color: 'var(--tx-faint)' }}>Loading conversations…</div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+                <div style={{ width: 22, height: 22, border: '2.5px solid var(--line)', borderTopColor: '#E01E5A', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+                <div style={{ fontSize: 13, color: 'var(--tx-faint)', fontFamily: 'var(--mono)' }}>Loading conversations…</div>
+              </div>
+            ) : anyConnected ? (
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 13, color: 'var(--tx-faint)' }}>Select a conversation</div>
               </div>
             ) : (
-              <div style={{ textAlign: 'center', maxWidth: 320 }}>
-                <div style={{ width: 52, height: 52, borderRadius: 'var(--r-lg)', background: 'var(--bg-raised)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, margin: '0 auto 16px' }}>💬</div>
-                <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--tx)', marginBottom: 8, letterSpacing: '-0.02em' }}>Your inbox is empty</div>
-                <div style={{ fontSize: 13, color: 'var(--tx-mid)', lineHeight: 1.7, marginBottom: 24 }}>
-                  Connect a messaging platform to see all your DMs here — from Slack, Discord, WhatsApp and more.
+              <div style={{ textAlign: 'center', maxWidth: 400 }}>
+                {/* Stacked platform icons */}
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 32, gap: 0 }}>
+                  {[
+                    { color: '#E01E5A', label: 'S', offset: -10, rotate: -6 },
+                    { color: '#5865F2', label: 'D', offset:   0, rotate:  0 },
+                    { color: '#25D366', label: 'W', offset:  10, rotate:  6 },
+                  ].map(({ color, label, offset, rotate }) => (
+                    <div key={label} style={{
+                      width: 48, height: 48, borderRadius: 14,
+                      background: color + '18',
+                      border: `1.5px solid ${color}35`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 16, fontWeight: 800, color,
+                      fontFamily: 'var(--mono)',
+                      transform: `rotate(${rotate}deg) translateY(${Math.abs(offset) > 0 ? 5 : 0}px)`,
+                      boxShadow: '0 4px 16px rgba(0,0,0,.07)',
+                      marginLeft: offset < 0 ? 0 : -6,
+                      zIndex: label === 'D' ? 2 : 1,
+                      position: 'relative',
+                    }}>{label}</div>
+                  ))}
                 </div>
+
+                <h2 style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.03em', color: 'var(--tx)', marginBottom: 10 }}>
+                  One inbox for every DM
+                </h2>
+                <p style={{ fontSize: 14, color: 'var(--tx-mid)', lineHeight: 1.75, marginBottom: 28, maxWidth: 310, margin: '0 auto 28px' }}>
+                  Connect your messaging accounts and reply to Slack, Discord, WhatsApp, and more — all from this window.
+                </p>
+
                 <Link
                   to="/settings"
                   state={{ tab: 'integrations' }}
-                  style={{ display: 'inline-block', padding: '10px 22px', background: 'var(--btn-bg)', color: 'var(--btn-fg)', borderRadius: 'var(--r-md)', fontWeight: 600, fontSize: 13, textDecoration: 'none' }}
+                  style={{
+                    display: 'inline-block', padding: '11px 26px',
+                    background: 'var(--btn-bg)', color: 'var(--btn-fg)',
+                    borderRadius: 'var(--r-md)', fontWeight: 600, fontSize: 13.5,
+                    textDecoration: 'none', letterSpacing: '-0.01em',
+                  }}
                 >
-                  Open Integrations →
+                  Connect a platform →
                 </Link>
+
+                <div style={{ marginTop: 14, fontSize: 11, color: 'var(--tx-faint)', fontFamily: 'var(--mono)' }}>
+                  Slack available now · Discord, WhatsApp &amp; more coming soon
+                </div>
               </div>
             )}
           </div>
