@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { setToken } from '../lib/tokenStore.js'
-import { platforms as platformsApi } from '../lib/api.js'
+import { useAuth } from '../context/AuthContext.jsx'
 
 export default function SlackCallback() {
   const navigate = useNavigate()
-  const [error,  setError]  = useState(null)
+  const { connectPlatform } = useAuth()
+  const [error, setError] = useState(null)
 
   useEffect(() => {
     async function handle() {
@@ -18,23 +19,23 @@ export default function SlackCallback() {
 
       if (err || !token) {
         setError(err || 'access_denied')
-        setTimeout(() => navigate('/connect', { replace: true }), 2000)
+        setTimeout(() => navigate('/settings', { replace: true, state: { tab: 'integrations' } }), 2000)
         return
       }
 
       try {
         await setToken('slack', token)
-        await platformsApi.connect('slack')
-        navigate('/connect', { replace: true })
+        await connectPlatform('slack')
+        navigate('/settings', { replace: true, state: { tab: 'integrations' } })
       } catch (e) {
         console.error('SlackCallback error:', e)
         setError(e.message)
-        setTimeout(() => navigate('/connect', { replace: true }), 2000)
+        setTimeout(() => navigate('/settings', { replace: true, state: { tab: 'integrations' } }), 2000)
       }
     }
 
     handle()
-  }, [navigate])
+  }, [navigate, connectPlatform])
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', fontFamily: 'var(--font)', gap: 12 }}>

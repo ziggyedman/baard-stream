@@ -261,6 +261,8 @@ router.get('/google/callback', (req, res, next) => {
 
 const SLACK_ENABLED    = !!(process.env.SLACK_CLIENT_ID && process.env.SLACK_CLIENT_SECRET)
 const SLACK_USER_SCOPE = 'channels:history,channels:read,im:history,im:read,users:read,chat:write'
+// In dev, Vite runs on a different port than Express, so we need the frontend origin explicitly.
+const FRONTEND_URL     = process.env.FRONTEND_URL || process.env.APP_URL
 
 if (SLACK_ENABLED) {
   console.log('✓ Slack OAuth enabled')
@@ -292,7 +294,7 @@ router.get('/slack/callback', async (req, res) => {
 
   const { code, error } = req.query
   if (error || !code) {
-    return res.redirect(`/slack-callback#error=${encodeURIComponent(error || 'access_denied')}`)
+    return res.redirect(`${FRONTEND_URL}/slack-callback#error=${encodeURIComponent(error || 'access_denied')}`)
   }
 
   try {
@@ -310,13 +312,13 @@ router.get('/slack/callback', async (req, res) => {
 
     if (!data.ok || !data.authed_user?.access_token) {
       console.error('Slack token exchange failed:', data.error)
-      return res.redirect(`/slack-callback#error=${encodeURIComponent(data.error || 'token_exchange_failed')}`)
+      return res.redirect(`${FRONTEND_URL}/slack-callback#error=${encodeURIComponent(data.error || 'token_exchange_failed')}`)
     }
 
-    res.redirect(`/slack-callback#t=${encodeURIComponent(data.authed_user.access_token)}`)
+    res.redirect(`${FRONTEND_URL}/slack-callback#t=${encodeURIComponent(data.authed_user.access_token)}`)
   } catch (err) {
     console.error('Slack OAuth error:', err.message)
-    res.redirect('/slack-callback#error=server_error')
+    res.redirect(`${FRONTEND_URL}/slack-callback#error=server_error`)
   }
 })
 
