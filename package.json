@@ -1,0 +1,30 @@
+{
+  "name": "baard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "baard — unified messaging inbox",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build":   "cd client && npm install && npm run build",
+    "start":   "node server/index.js",
+    "dev":     "concurrently -n server,client -c cyan,magenta \"node --watch server/index.js\" \"cd client && npm run dev\""
+  },
+  "dependencies": {
+    "bcryptjs":                "^2.4.3",
+    "cookie-parser":           "^1.4.6",
+    "cors":                    "^2.8.5",
+    "dotenv":                  "^16.4.5",
+    "express":                 "^4.21.2",
+    "express-validator":       "^7.2.0",
+    "helmet":                  "^8.0.0",
+    "jsonwebtoken":            "^9.0.2",
+    "passport":                "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "passport-local":          "^1.0.0",
+    "pg":                      "^8.13.3",
+    "express-rate-limit":      "^7.4.1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
