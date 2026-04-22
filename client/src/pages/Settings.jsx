@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import Logo from '../components/Logo.jsx'
 import ThemeToggle from '../components/ThemeToggle.jsx'
 import PlatformBadge, { PLATFORMS } from '../components/PlatformBadge.jsx'
@@ -84,9 +84,9 @@ function SaveToast({ show }) {
 
 /* ── Sidebar ────────────────────────────────────────────────────────────── */
 const SECTIONS = [
-  { id: 'privacy',       label: 'Privacy & Data',     icon: '🔒', badge: 'Read first' },
+  { id: 'integrations',  label: 'Integrations',        icon: '⬡' },
+  { id: 'privacy',       label: 'Privacy & Data',      icon: '🔒' },
   { id: 'profile',       label: 'Profile',             icon: '○' },
-  { id: 'platforms',     label: 'Platforms',           icon: '⬡' },
   { id: 'notifications', label: 'Notifications',       icon: '🔔' },
   { id: 'appearance',    label: 'Appearance',          icon: '◑' },
   { id: 'account',       label: 'Account & Plan',      icon: '◻' },
@@ -208,11 +208,18 @@ function ProfilePanel({ onSave }) {
   )
 }
 
-function PlatformsPanel() {
-  const { user, platformConnections, connectPlatform, revokePlatform } = useAuth()
+// Platforms with working OAuth — others show "Coming soon"
+const OAUTH_URLS = { slack: '/api/auth/slack' }
+
+function IntegrationsPanel() {
+  const { user, platformConnections, revokePlatform } = useAuth()
   const [confirming, setConfirming] = useState(null)
-  const [error, setError] = useState(null)
+  const [error,      setError]      = useState(null)
   const connectedCount = Object.values(platformConnections).filter(c => c.connected).length
+
+  const handleConnect = (id) => {
+    if (OAUTH_URLS[id]) window.location.href = OAUTH_URLS[id]
+  }
 
   const handleRevoke = async (id) => {
     setConfirming(null); setError(null)
@@ -220,57 +227,66 @@ function PlatformsPanel() {
     catch (err) { setError(err.message) }
   }
 
-  const handleConnect = async (id) => {
-    setError(null)
-    try { await connectPlatform(id) }
-    catch (err) { setError(err.message) }
-  }
-
   return (
     <div>
       <div style={{ marginBottom: 20 }}><PrivacyBanner compact /></div>
-      {error && <div style={{ padding: '10px 14px', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 'var(--r-md)', fontSize: 13, color: '#DC2626', marginBottom: 14 }}>{error}</div>}
+      {error && (
+        <div style={{ padding: '10px 14px', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 'var(--r-md)', fontSize: 13, color: '#DC2626', marginBottom: 14 }}>{error}</div>
+      )}
 
-      <Section title="Connected platforms" description="Revoking disconnects the live relay. Your messages on the source platform are never affected.">
+      <Section title="Messaging platforms" description="Connect your accounts to bring all your DMs into one inbox. OAuth tokens are stored only in your browser — never on our servers.">
         {Object.entries(PLATFORMS).map(([id, pl], i, arr) => {
-          const conn = platformConnections[id] || { connected: false }
-          const isLast = i === arr.length - 1
+          const conn         = platformConnections[id] || { connected: false }
+          const isAvailable  = !!OAUTH_URLS[id]
+          const isLast       = i === arr.length - 1
           const isConfirming = confirming === id
+
           return (
-            <div key={id} style={{ borderBottom: isLast ? 'none' : '1px solid var(--line)' }}>
+            <div key={id} style={{ borderBottom: isLast ? 'none' : '1px solid var(--line)', opacity: isAvailable ? 1 : 0.5 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '13px 18px' }}>
                 <PlatformBadge id={id} size="md" />
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx)', marginBottom: 2 }}>{pl.name}</div>
-                  <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--tx-faint)' }}>
-                    {conn.connected ? `Connected${conn.connectedAt ? ' ' + new Date(conn.connectedAt).toLocaleDateString() : ''}` : 'Not connected'}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx)' }}>{pl.name}</span>
+                    {!isAvailable && (
+                      <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--tx-faint)', background: 'var(--bg-sunken)', border: '1px solid var(--line)', borderRadius: 99, padding: '1px 6px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Soon</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: conn.connected ? pl.color : 'var(--tx-faint)' }}>
+                    {conn.connected
+                      ? `Connected${conn.connectedAt ? ' · ' + new Date(conn.connectedAt).toLocaleDateString() : ''}`
+                      : isAvailable ? 'Not connected' : 'Coming soon'}
                   </div>
                 </div>
-                {conn.revoking ? (
-                  <span style={{ fontSize: 12, color: 'var(--tx-faint)' }}>Revoking…</span>
-                ) : conn.connected ? (
-                  isConfirming ? (
-                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                      <span style={{ fontSize: 12, color: 'var(--tx-mid)' }}>Disconnect {pl.name}?</span>
-                      <Btn danger onClick={() => handleRevoke(id)}>Yes, revoke</Btn>
-                      <Btn onClick={() => setConfirming(null)}>Cancel</Btn>
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <div style={{ width: 7, height: 7, borderRadius: '50%', background: pl.color }} />
-                        <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--tx-faint)' }}>Live</span>
+
+                {isAvailable && (
+                  conn.revoking ? (
+                    <span style={{ fontSize: 12, color: 'var(--tx-faint)' }}>Revoking…</span>
+                  ) : conn.connected ? (
+                    isConfirming ? (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <span style={{ fontSize: 12, color: 'var(--tx-mid)' }}>Disconnect?</span>
+                        <Btn danger onClick={() => handleRevoke(id)}>Yes, revoke</Btn>
+                        <Btn onClick={() => setConfirming(null)}>Cancel</Btn>
                       </div>
-                      <Btn onClick={() => setConfirming(id)}>Disconnect</Btn>
-                    </div>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <div style={{ width: 7, height: 7, borderRadius: '50%', background: pl.color }} />
+                          <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--tx-faint)' }}>Live</span>
+                        </div>
+                        <Btn onClick={() => setConfirming(id)}>Disconnect</Btn>
+                      </div>
+                    )
+                  ) : (
+                    <Btn variant="accent" onClick={() => handleConnect(id)}>Connect →</Btn>
                   )
-                ) : (
-                  <Btn variant="accent" onClick={() => handleConnect(id)}>Connect →</Btn>
                 )}
               </div>
+
               {isConfirming && (
                 <div style={{ margin: '0 18px 12px', padding: '9px 12px', background: 'var(--bg-sunken)', borderRadius: 'var(--r-md)', border: '1px solid var(--line)', fontSize: 12, color: 'var(--tx-mid)', lineHeight: 1.6 }}>
-                  baard will immediately stop relaying messages from <strong>{pl.name}</strong>. Your messages on {pl.name} are untouched.
+                  baard will stop relaying messages from <strong>{pl.name}</strong>. Your messages on {pl.name} are untouched.
                 </div>
               )}
             </div>
@@ -286,7 +302,7 @@ function PlatformsPanel() {
             ))}
           </div>
           <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--tx-faint)' }}>
-            {connectedCount} of {user?.plan === 'free' ? 3 : 10} platforms used ·{' '}
+            {connectedCount} of {user?.plan === 'free' ? 3 : 10} platforms connected ·{' '}
             {user?.plan === 'free' && <Link to="/pricing" style={{ color: 'var(--accent-fg)' }}>Upgrade to Pro →</Link>}
           </div>
         </div>
@@ -509,7 +525,8 @@ function SecurityPanel() {
 ═══════════════════════════════════════════════════════════════════════════ */
 
 export default function Settings() {
-  const [active, setActive]   = useState('privacy')
+  const location = useLocation()
+  const [active, setActive]   = useState(location.state?.tab || 'integrations')
   const [toast,  setToast]    = useState(false)
   const { user, settings, signOut, saveSettings } = useAuth()
   const navigate = useNavigate()
@@ -529,9 +546,9 @@ export default function Settings() {
   }
 
   const PANELS = {
+    integrations:  () => <IntegrationsPanel />,
     privacy:       () => <PrivacyPanel settings={settings} onSave={handleSave} />,
     profile:       () => <ProfilePanel onSave={handleSave} />,
-    platforms:     () => <PlatformsPanel />,
     notifications: () => <NotificationsPanel settings={settings} onSave={handleSave} />,
     appearance:    () => <AppearancePanel settings={settings} onSave={handleSave} />,
     account:       () => <AccountPanel />,

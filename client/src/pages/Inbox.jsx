@@ -6,69 +6,6 @@ import PlatformBadge, { PLATFORMS } from '../components/PlatformBadge.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import * as slackApi from '../lib/slackApi.js'
 
-/* ── Mock contacts (shown when no platforms are connected) ──────────────── */
-const MOCK_CONTACTS = [
-  {
-    id: 1, name: 'Sarah Chen', init: 'SC', hue: '#D4BCFA',
-    platforms: ['slack', 'whatsapp', 'instagram'], unread: 3,
-    messages: [
-      { id: 1, platform: 'slack',     text: 'Hey! Did you review the deck I sent?',        time: '10:32', in: true  },
-      { id: 2, platform: 'slack',     text: 'Yes! Really strong. Tweaks on slide 4.',       time: '10:35', in: false },
-      { id: 3, platform: 'whatsapp',  text: 'Can you hop on a quick call later?',           time: '11:02', in: true  },
-      { id: 4, platform: 'instagram', text: 'Just posted something you\'d love 😄',         time: '11:45', in: true  },
-      { id: 5, platform: 'whatsapp',  text: 'Sure, 3pm works perfectly!',                   time: '11:50', in: false },
-      { id: 6, platform: 'slack',     text: 'Amazing. Sending a calendar invite.',           time: '12:10', in: true  },
-      { id: 7, platform: 'whatsapp',  text: 'Running 10 mins late, sorry! 🙏',              time: '14:52', in: true  },
-    ],
-  },
-  {
-    id: 2, name: 'Marcus Rivera', init: 'MR', hue: '#FAC8B4',
-    platforms: ['telegram', 'discord', 'x'], unread: 7,
-    messages: [
-      { id: 1, platform: 'discord',  text: 'The new update just dropped 🔥',               time: '09:15', in: true  },
-      { id: 2, platform: 'x',        text: 'Thread already at 50k impressions!',            time: '09:45', in: true  },
-      { id: 3, platform: 'telegram', text: 'Big announcement in the channel.',              time: '10:20', in: true  },
-      { id: 4, platform: 'discord',  text: 'What\'s the announcement?!',                   time: '10:25', in: false },
-      { id: 5, platform: 'telegram', text: 'Series A 🚀🚀🚀 We closed it!!',               time: '10:30', in: true  },
-      { id: 6, platform: 'x',        text: 'Congrats!! This is huge.',                     time: '10:32', in: false },
-      { id: 7, platform: 'discord',  text: 'Celebrating tonight — you coming?',            time: '11:00', in: true  },
-    ],
-  },
-  {
-    id: 3, name: 'Priya Sharma', init: 'PS', hue: '#B4E4FA',
-    platforms: ['linkedin', 'teams', 'whatsapp'], unread: 1,
-    messages: [
-      { id: 1, platform: 'linkedin', text: 'Loved your article on AI trends!',             time: 'Yesterday', in: true  },
-      { id: 2, platform: 'linkedin', text: 'Thank you! Working on part 2.',                time: 'Yesterday', in: false },
-      { id: 3, platform: 'teams',    text: 'Joining the 9am standup?',                     time: '08:30',     in: true  },
-      { id: 4, platform: 'teams',    text: 'Yes, will be there in 5.',                     time: '08:55',     in: false },
-      { id: 5, platform: 'whatsapp', text: 'The client loved the proposal! 🎉',            time: '14:15',     in: true  },
-    ],
-  },
-  {
-    id: 4, name: 'Alex Thompson', init: 'AT', hue: '#FAC8B4',
-    platforms: ['messenger', 'imessage'], unread: 0,
-    messages: [
-      { id: 1, platform: 'imessage',  text: 'Happy birthday!! 🎂',                         time: 'Mon', in: true  },
-      { id: 2, platform: 'messenger', text: 'Thank you!! Best day 😊',                     time: 'Mon', in: false },
-      { id: 3, platform: 'imessage',  text: 'We need to catch up soon.',                   time: 'Mon', in: true  },
-      { id: 4, platform: 'messenger', text: 'Coffee next week?',                           time: 'Mon', in: false },
-      { id: 5, platform: 'imessage',  text: 'Saturday morning works!',                     time: 'Tue', in: true  },
-    ],
-  },
-  {
-    id: 5, name: 'Jordan Lee', init: 'JL', hue: '#D4BCFA',
-    platforms: ['slack', 'teams', 'discord'], unread: 2,
-    messages: [
-      { id: 1, platform: 'teams',   text: 'Sprint review at 4pm today ✅',                time: '08:00', in: true  },
-      { id: 2, platform: 'slack',   text: 'Can you drop the metrics in the channel?',     time: '09:30', in: true  },
-      { id: 3, platform: 'slack',   text: 'Just shared it — #product-metrics',            time: '09:35', in: false },
-      { id: 4, platform: 'discord', text: 'Game night Friday? Everyone\'s in 🎮',        time: '10:45', in: true  },
-      { id: 5, platform: 'teams',   text: 'Q3 numbers look really solid 💪',             time: '13:00', in: true  },
-    ],
-  },
-]
-
 /* ── Helpers ────────────────────────────────────────────────────────────── */
 
 function formatSlackTime(ts) {
@@ -150,11 +87,9 @@ export default function Inbox() {
   const { user, signOut, platformConnections } = useAuth()
   const navigate = useNavigate()
 
-  const [contacts,      setContacts]      = useState(MOCK_CONTACTS)
-  const [selectedId,    setSelectedId]    = useState(MOCK_CONTACTS[0]?.id)
-  const [msgsByContact, setMsgsByContact] = useState(
-    Object.fromEntries(MOCK_CONTACTS.map(c => [c.id, c.messages]))
-  )
+  const [contacts,      setContacts]      = useState([])
+  const [selectedId,    setSelectedId]    = useState(null)
+  const [msgsByContact, setMsgsByContact] = useState({})
   const [filter,        setFilter]        = useState('all')
   const [replyText,     setReplyText]     = useState('')
   const [replyPlatform, setReplyPlatform] = useState('slack')
@@ -165,6 +100,7 @@ export default function Inbox() {
   const endRef = useRef(null)
 
   const slackConnected = platformConnections?.slack?.connected
+  const anyConnected   = Object.values(platformConnections || {}).some(c => c.connected)
 
   const selected        = contacts.find(c => c.id === selectedId) ?? null
   const allMsgs         = msgsByContact[selectedId] || []
@@ -176,12 +112,12 @@ export default function Inbox() {
   const userInit  = userName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
   const userEmail = user?.email || ''
 
-  /* ── Load Slack DMs when connected, reset to mock when not ─────────────── */
+  /* ── Load Slack DMs when connected ─────────────────────────────────────── */
   useEffect(() => {
     if (!slackConnected) {
-      setContacts(MOCK_CONTACTS)
-      setSelectedId(MOCK_CONTACTS[0]?.id)
-      setMsgsByContact(Object.fromEntries(MOCK_CONTACTS.map(c => [c.id, c.messages])))
+      setContacts([])
+      setSelectedId(null)
+      setMsgsByContact({})
       setSlackSelf(null)
       return
     }
@@ -236,7 +172,7 @@ export default function Inbox() {
     return () => { cancelled = true }
   }, [slackConnected])
 
-  /* ── Lazy-load messages for a Slack DM when it's selected ──────────────── */
+  /* ── Lazy-load messages when a Slack DM is selected ────────────────────── */
   useEffect(() => {
     if (!slackConnected || !selectedId || msgsByContact[selectedId] !== undefined || !slackSelf) return
 
@@ -277,7 +213,6 @@ export default function Inbox() {
     const msg  = { id: Date.now(), platform: replyPlatform, text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), in: false }
     setMsgsByContact(p => ({ ...p, [selectedId]: [...(p[selectedId] || []), msg] }))
     setReplyText('')
-
     if (replyPlatform === 'slack' && slackConnected) {
       slackApi.sendMessage(selectedId, text).catch(err => console.error('Slack send failed:', err))
     }
@@ -290,6 +225,7 @@ export default function Inbox() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: 'var(--bg)', overflow: 'hidden', fontFamily: 'var(--font)' }}>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
 
       {/* ── Sidebar ── */}
       <div style={{ width: 260, borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
@@ -314,19 +250,24 @@ export default function Inbox() {
         {/* Contacts */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px' }}>
           <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--tx-faint)', textTransform: 'uppercase', padding: '4px 4px', marginBottom: 6, fontFamily: 'var(--mono)' }}>
-            {slackConnected ? 'Slack DMs' : 'People'}
+            Messages
           </div>
 
           {slackLoading ? (
             <div style={{ padding: '24px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
               <div style={{ width: 16, height: 16, border: '2px solid var(--line)', borderTopColor: '#E01E5A', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
-              <span style={{ fontSize: 11, color: 'var(--tx-faint)', fontFamily: 'var(--mono)' }}>Loading Slack…</span>
-              <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+              <span style={{ fontSize: 11, color: 'var(--tx-faint)', fontFamily: 'var(--mono)' }}>Loading…</span>
             </div>
-          ) : visibleContacts.length === 0 ? (
-            <div style={{ padding: '24px 8px', textAlign: 'center' }}>
-              <div style={{ fontSize: 12, color: 'var(--tx-faint)', marginBottom: 8 }}>No conversations</div>
-              <Link to="/connect" style={{ fontSize: 11, color: 'var(--accent-fg)', textDecoration: 'none' }}>+ Connect a platform</Link>
+          ) : contacts.length === 0 ? (
+            <div style={{ padding: '20px 8px', textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: 'var(--tx-faint)', marginBottom: 10, lineHeight: 1.6 }}>
+                {anyConnected ? 'No conversations yet' : 'No platforms connected'}
+              </div>
+              {!anyConnected && (
+                <Link to="/settings" state={{ tab: 'integrations' }} style={{ fontSize: 11, color: 'var(--accent-fg)', textDecoration: 'none', fontWeight: 500 }}>
+                  Connect a platform →
+                </Link>
+              )}
             </div>
           ) : (
             visibleContacts.map(c => (
@@ -335,7 +276,7 @@ export default function Inbox() {
           )}
         </div>
 
-        {/* Footer — user info */}
+        {/* Footer */}
         <div style={{ padding: '10px 12px', borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 }}>
           {user?.avatar_url ? (
             <img src={user.avatar_url} alt={userName} style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0, border: '1px solid var(--line)' }} />
@@ -369,18 +310,27 @@ export default function Inbox() {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         {!selected ? (
           /* Empty / loading state */
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10 }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             {slackLoading ? (
-              <>
-                <div style={{ width: 18, height: 18, border: '2px solid var(--line)', borderTopColor: '#E01E5A', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 20, height: 20, border: '2px solid var(--line)', borderTopColor: '#E01E5A', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
                 <div style={{ fontSize: 13, color: 'var(--tx-faint)' }}>Loading conversations…</div>
-              </>
+              </div>
             ) : (
-              <>
-                <div style={{ fontSize: 22, marginBottom: 2 }}>💬</div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tx)', marginBottom: 4 }}>No conversations yet</div>
-                <Link to="/connect" style={{ fontSize: 13, color: 'var(--accent-fg)', textDecoration: 'none' }}>Connect a platform →</Link>
-              </>
+              <div style={{ textAlign: 'center', maxWidth: 320 }}>
+                <div style={{ width: 52, height: 52, borderRadius: 'var(--r-lg)', background: 'var(--bg-raised)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, margin: '0 auto 16px' }}>💬</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--tx)', marginBottom: 8, letterSpacing: '-0.02em' }}>Your inbox is empty</div>
+                <div style={{ fontSize: 13, color: 'var(--tx-mid)', lineHeight: 1.7, marginBottom: 24 }}>
+                  Connect a messaging platform to see all your DMs here — from Slack, Discord, WhatsApp and more.
+                </div>
+                <Link
+                  to="/settings"
+                  state={{ tab: 'integrations' }}
+                  style={{ display: 'inline-block', padding: '10px 22px', background: 'var(--btn-bg)', color: 'var(--btn-fg)', borderRadius: 'var(--r-md)', fontWeight: 600, fontSize: 13, textDecoration: 'none' }}
+                >
+                  Open Integrations →
+                </Link>
+              </div>
             )}
           </div>
         ) : (
@@ -427,7 +377,7 @@ export default function Inbox() {
                   <span style={{ fontSize: 10, color: 'var(--tx-faint)', fontFamily: 'var(--mono)', letterSpacing: '0.08em' }}>TODAY</span>
                   <div style={{ flex: 1, height: 1, background: 'var(--line)' }} />
                 </div>
-                {filteredMsgs.length === 0 && !slackLoading && (
+                {filteredMsgs.length === 0 && (
                   <div style={{ textAlign: 'center', color: 'var(--tx-faint)', fontSize: 12, marginTop: 20 }}>No messages yet</div>
                 )}
                 {filteredMsgs.map((msg, i) => (
